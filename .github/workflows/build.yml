@@ -24,8 +24,6 @@ jobs:
           rm -rf romfs
           mkdir -p romfs
           unzip -oq assets.zip -d romfs
-          echo "--- romfs top level ---"
-          ls -la romfs | head -n 30
           # If the zip contained a single wrapper folder, move its contents up one level
           if [ "$(ls -A romfs | wc -l)" -eq 1 ] && [ -d "romfs/$(ls -A romfs)" ]; then
             inner="romfs/$(ls -A romfs)"
@@ -33,14 +31,18 @@ jobs:
             mv "$inner"/* romfs/
             rmdir "$inner" || true
           fi
+          ls -la romfs | head -n 30
 
-      - name: Build .3dsx / .elf with devkitARM
+      # The .elf is all the CIA needs. The Makefile's own .3dsx step fails with
+      # "Cannot open SMDH file!", so errors from make are tolerated here as long as
+      # the .elf was linked. The .3dsx is made separately below.
+      - name: Build .elf with devkitARM
         run: |
           docker run --rm -v "$PWD":/work -w /work devkitpro/devkitarm:latest \
-            sh -c "dkp-pacman -Sy --noconfirm 3ds-dev || true; make"
+            sh -c "make || true"
           sudo chown -R "$USER" . || true
-          ls -la KsushaPie3DS.*
-          test -f KsushaPie3DS.elf
+          ls -la KsushaPie3DS.* || true
+          test -f KsushaPie3DS.elf || { echo "ERROR: KsushaPie3DS.elf was not built - check the compile errors above"; exit 1; }
 
       - name: Install tools (makerom, bannertool, qrencode)
         run: |
@@ -63,7 +65,6 @@ jobs:
           chmod +x makerom
 
           # bannertool: build from source
-          # CMAKE_POLICY_VERSION_MINIMUM fixes the "Compatibility with CMake < 3.5" error
           git clone --depth 1 --recursive https://github.com/carstene1ns/3ds-bannertool.git
           cmake -S 3ds-bannertool -B bt_build \
             -DCMAKE_BUILD_TYPE=Release \
@@ -77,17 +78,32 @@ jobs:
           echo "$PWD" >> "$GITHUB_PATH"
           ls -la
 
-      - name: Make the CIA (icon.png + banner.png)
+      - name: Make banner + icon
         run: |
           set -e
-          test -d romfs && test -n "$(ls -A romfs)" || { echo "romfs is missing or empty"; exit 1; }
           mkdir -p build
           bannertool makebanner -i banner.png -a banner.wav -o build/banner.bnr
           bannertool makesmdh -s "Ksusha cooks a pie 3" -l "Help Ksusha cook a pie" -p "Vova games studio" -i icon.png -o build/icon.icn
+          ls -la build
+
+      - name: Make the CIA
+        run: |
+          set -e
+          test -n "$(ls -A romfs)" || { echo "romfs is empty"; exit 1; }
           makerom -f cia -o KsushaPie3DS.cia -elf KsushaPie3DS.elf -rsf app.rsf -target t -exefslogo \
             -banner build/banner.bnr -icon build/icon.icn \
             -DAPP_TITLE="Ksusha cooks a pie 3" -DAPP_ROMFS="$PWD/romfs"
           ls -la KsushaPie3DS.cia
+
+      # Optional: .3dsx for the Homebrew Launcher, using the SMDH made above.
+      - name: Make the .3dsx (optional)
+        continue-on-error: true
+        run: |
+          docker run --rm -v "$PWD":/work -w /work devkitpro/devkitarm:latest \
+            /opt/devkitpro/tools/bin/3dsxtool KsushaPie3DS.elf KsushaPie3DS.3dsx \
+            --smdh=build/icon.icn --romfs=romfs
+          sudo chown -R "$USER" . || true
+          ls -la KsushaPie3DS.3dsx
 
       - name: Make the QR code
         run: |
