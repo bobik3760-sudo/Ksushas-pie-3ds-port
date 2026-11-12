@@ -86,6 +86,15 @@ jobs:
           bannertool makesmdh -s "Ksusha cooks a pie 3" -l "Help Ksusha cook a pie" -p "Vova games studio" -i icon.png -o build/icon.icn
           ls -la build
 
+      # Newer makerom requires AccessControlInfo/HandleTableSize in the .rsf
+      - name: Patch app.rsf (add HandleTableSize if missing)
+        run: |
+          if ! grep -q "HandleTableSize" app.rsf; then
+            echo "Adding HandleTableSize to app.rsf"
+            sed -i '/^AccessControlInfo:/a\  HandleTableSize: 0x200' app.rsf
+          fi
+          grep -n -B2 -A2 "HandleTableSize" app.rsf || { echo "ERROR: app.rsf has no AccessControlInfo section - paste app.rsf in chat"; exit 1; }
+
       - name: Make the CIA
         run: |
           set -e
