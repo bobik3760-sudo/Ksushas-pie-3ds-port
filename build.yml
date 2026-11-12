@@ -1,0 +1,83 @@
+# Put this file at  .github/workflows/build.yml  in your GitHub repository.
+# On every push it builds the game, publishes KsushaPie3DS.cia + .3dsx as a GitHub Release
+# and creates KsushaPie3DS_QR.png - scan it with FBI (Remote Install > Scan QR Code) to install.
+# The repository must be PUBLIC so the console can download the release file.
+name: Build 3DS game + QR code
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .3dsx / .elf with devkitARM
+        run: |
+          docker run --rm -v "$PWD":/work -w /work devkitpro/devkitarm:latest \
+            sh -c "dkp-pacman -Sy --noconfirm 3ds-dev >/dev/null 2>&1 || true; make"
+          sudo chown -R "$USER" . || true
+          ls -la KsushaPie3DS.*
+
+      - name: Install tools (makerom, bannertool, qrencode)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential cmake git qrencode unzip curl
+          # makerom: prebuilt release, falling back to building from source
+          mkdir -p tools_bin && cd tools_bin
+          if curl -fsSL -o makerom.zip "https://github.com/3DSGuy/Project_CTR/releases/download/makerom-v0.18.4/makerom-v0.18.4-ubuntu_x86_64.zip"; then
+            unzip -o makerom.zip && chmod +x makerom
+          else
+            git clone --depth 1 https://github.com/3DSGuy/Project_CTR.git
+            (cd Project_CTR/makerom && make deps && make -j2)
+            cp "$(find Project_CTR -name makerom -type f | head -n1)" makerom
+          fi
+          # bannertool: build from source
+          git clone --depth 1 --recursive https://github.com/carstene1ns/3ds-bannertool.git
+          cmake -S 3ds-bannertool -B bt_build && cmake --build bt_build -j2
+          cp "$(find bt_build -name bannertool -type f | head -n1)" bannertool
+          chmod +x makerom bannertool
+          echo "$PWD" >> "$GITHUB_PATH"
+
+      - name: Make the CIA (icon.png + banner.png)
+        run: |
+          mkdir -p build
+          bannertool makebanner -i banner.png -a banner.wav -o build/banner.bnr
+          bannertool makesmdh -s "Ksusha cooks a pie 3" -l "Help Ksusha cook a pie" -p "Vova games studio" -i icon.png -o build/icon.icn
+          makerom -f cia -o KsushaPie3DS.cia -elf KsushaPie3DS.elf -rsf app.rsf -target t -exefslogo \
+            -banner build/banner.bnr -icon build/icon.icn \
+            -DAPP_TITLE="Ksusha cooks a pie 3" -DAPP_ROMFS="$PWD/romfs"
+          ls -la KsushaPie3DS.cia
+
+      - name: Make the QR code
+        run: |
+          URL="https://github.com/${{ github.repository }}/releases/download/latest/KsushaPie3DS.cia"
+          echo "$URL" > download_url.txt
+          qrencode -o KsushaPie3DS_QR.png -s 12 -m 2 "$URL"
+          echo "### Scan with FBI: Remote Install > Scan QR Code" >> "$GITHUB_STEP_SUMMARY"
+          echo "$URL" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish release (CIA + 3DSX + QR)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Ksusha cooks a pie 3 (latest build)
+          body: "Scan KsushaPie3DS_QR.png with FBI (Remote Install > Scan QR Code) or download the CIA directly."
+          files: |
+            KsushaPie3DS.cia
+            KsushaPie3DS.3dsx
+            KsushaPie3DS_QR.png
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: KsushaPie3DS-build
+          path: |
+            KsushaPie3DS.cia
+            KsushaPie3DS.3dsx
+            KsushaPie3DS_QR.png
+            download_url.txt
