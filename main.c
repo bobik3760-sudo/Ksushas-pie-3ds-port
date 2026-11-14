@@ -15,6 +15,14 @@
 /* If sprites rotate the wrong way on real hardware, change this to -1.0f */
 #define ROT_SIGN 1.0f
 
+/* Textures showed up upside down (vertical flip). 1 = flip them back, 0 = old behaviour. */
+#define FLIP_V 1
+#if FLIP_V
+#define SET_V(st, vt, vb) do { (st).top = (vb); (st).bottom = (vt); } while (0)
+#else
+#define SET_V(st, vt, vb) do { (st).top = (vt); (st).bottom = (vb); } while (0)
+#endif
+
 /* ------------------------------------------------------------- textures */
 struct Tex {
     C3D_Tex tex;
@@ -46,7 +54,7 @@ Tex *plat_tex_load_file(const char *rel)
     C3D_TexSetWrap(&t->tex, GPU_CLAMP_TO_EDGE, GPU_CLAMP_TO_EDGE);
     t->sub.width = (u16)w;  t->sub.height = (u16)h;
     t->sub.left = 0.0f;     t->sub.right = (float)w / tw;
-    t->sub.top = 1.0f;      t->sub.bottom = 1.0f - (float)h / th;
+    SET_V(t->sub, 1.0f, 1.0f - (float)h / th);
     t->img.tex = &t->tex;   t->img.subtex = &t->sub;
     return t;
 }
@@ -100,7 +108,7 @@ void plat_draw_part(Tex *t, int sx, int sy, int sw, int sh, float dx, float dy)
     Tex3DS_SubTexture st;
     st.width = (u16)sw; st.height = (u16)sh;
     st.left = sx / tw;  st.right = (sx + sw) / tw;
-    st.top = 1.0f - sy / th; st.bottom = 1.0f - (sy + sh) / th;
+    SET_V(st, 1.0f - sy / th, 1.0f - (sy + sh) / th);
     C2D_Image im = { &t->tex, &st };
     C2D_DrawImageAt(im, dx, dy, 0.0f, NULL, 1.0f, 1.0f);
 }
